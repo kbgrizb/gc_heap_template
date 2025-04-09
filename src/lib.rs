@@ -267,6 +267,7 @@ pub struct CopyingHeap<const HEAP_SIZE: usize, const MAX_BLOCKS: usize> {
 }
 
 impl<const HEAP_SIZE: usize, const MAX_BLOCKS: usize> CopyingHeap<HEAP_SIZE, MAX_BLOCKS> {
+
     fn collect<T: Tracer>(&mut self, tracer: &T) -> anyhow::Result<(), HeapError> {
         let inactive = (self.active_heap + 1) % 2;
         let (src, dest) =
@@ -275,17 +276,26 @@ impl<const HEAP_SIZE: usize, const MAX_BLOCKS: usize> CopyingHeap<HEAP_SIZE, MAX
         // Outline
         //
         // 1. Run the `trace()` method of the `tracer` to find blocks in use.
-        let mut blocks = [false; HEAP_SIZE];
+        let mut blocks = [false; MAX_BLOCKS];
         tracer.trace(&mut blocks);
  
         // 2. For each block in use:
         //    * Copy the block from `src` to `dest`.
         for (i, block) in blocks.iter().enumerate(){
             if *block{
-                src.copy(&self.block_info[i].unwrap(), dest)?;
+                let new_block_info = src.copy(&self.block_info[i].unwrap(), dest)?;
+                self.block_info[i] = Some(new_block_info);
+            }
+            else{
+                self.block_info[i] = None;
             }
         };
- 
+
+        // Update block_info[i]
+            // * If the block is not in use, reset it to None.
+            // * If the block gets copied, overwrite its entry
+            //   with what you get from copy().
+
         // 3. Clear the active heap.
         self.heaps[self.active_heap].clear();
  
@@ -347,6 +357,9 @@ impl<const HEAP_SIZE: usize, const MAX_BLOCKS: usize> GarbageCollectingHeap
         // 1. Find an available block number
         //    * If none are available, perform a collection.
         //    * If none are still available, report out of blocks.
+        if num_words == 0{
+            return Err(ZeroSizeRequest)
+        }
 
         
         let block_num = match self.block_info.available_block() {
@@ -369,7 +382,7 @@ impl<const HEAP_SIZE: usize, const MAX_BLOCKS: usize> GarbageCollectingHeap
             Err(_) => match self.collect(tracer) {
                 Ok(_) => match self.heaps[self.active_heap].malloc(num_words) {
                     Ok(addy2) => addy2,
-                    Err(_) => return Err(HeapError::ZeroSizeRequest),
+                    Err(_) => return Err(HeapError::OutOfMemory),
                 },
                 Err(_) => return Err(HeapError::OutOfMemory),
             },
